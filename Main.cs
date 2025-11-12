@@ -51,7 +51,7 @@ namespace AutoPOE
 
                 }
             }
-                
+
             return base.Tick();
         }
 
@@ -62,7 +62,7 @@ namespace AutoPOE
 
             if (Settings.StartBot.PressedOnce())
             {
-                _scarabTraderSequence = new ScarabTraderSequence(); 
+                _scarabTraderSequence = new ScarabTraderSequence();
                 Core.IsBotRunning = !Core.IsBotRunning;
             }
 
