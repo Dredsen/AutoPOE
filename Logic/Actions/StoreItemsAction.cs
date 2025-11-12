@@ -9,6 +9,8 @@ using System.Linq;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Forms;
+
 
 namespace AutoPOE.Logic.Actions
 {
@@ -82,11 +84,37 @@ namespace AutoPOE.Logic.Actions
 
             foreach (var item in playerInventory)
             {
-                if (!Core.GameController.IngameState.IngameUi.InventoryPanel.IsVisible) return ActionResultType.Failure;
+                //if (!Core.GameController.IngameState.IngameUi.InventoryPanel.IsVisible) return ActionResultType.Failure;
+                //var center = item.GetClientRect().Center;
+                //await Controls.ClickScreenPos(new Vector2(center.X, center.Y), isLeft: true, exactPosition: false, holdCtrl: true);
+                //await Task.Delay(Core.Settings.ActionFrequency);
+                //SimulacrumState.StoreItemAttemptCount++;
+
+                if (!Core.GameController.IngameState.IngameUi.InventoryPanel.IsVisible)
+                    return ActionResultType.Failure;
                 var center = item.GetClientRect().Center;
-                await Controls.ClickScreenPos(new Vector2(center.X, center.Y), isLeft: true, exactPosition: false, holdCtrl: true);
+                var itemCenterVec = new Vector2(center.X, center.Y);
+
+                ExileCore.Input.KeyDown(Keys.ControlKey); // Force Ctrl key down
+                await Task.Delay(25); 
+
+                await Controls.ClickScreenPos(itemCenterVec, isLeft: true, exactPosition: false, holdCtrl: false);
                 await Task.Delay(Core.Settings.ActionFrequency);
+
+                ExileCore.Input.KeyUp(Keys.ControlKey); // Release key
+
                 SimulacrumState.StoreItemAttemptCount++;
+
+                // Safety check to ensure we didn't end up holding the item by lag
+                if (Core.GameController.IngameState.IngameUi.Cursor.Action == MouseActionType.HoldItem)
+                {
+                    await Controls.ClickScreenPos(itemCenterVec, isLeft: true, exactPosition: false, holdCtrl: false);
+                    await Task.Delay(50);
+
+                    return ActionResultType.Running;
+                }
+
+                await Task.Delay(25); // Small delay between items
             }
 
             if (Core.Settings.UseIncubators)
