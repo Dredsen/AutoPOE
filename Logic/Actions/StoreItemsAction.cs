@@ -40,6 +40,11 @@ namespace AutoPOE.Logic.Actions
 
         public async Task<ActionResultType> Tick()
         {
+            if (Core.Map.ClosestValidGroundItem != null)
+            {
+                return ActionResultType.Exception;
+            }
+
             if (SimulacrumState.StoreItemAttemptCount > 100)
             {
                 Core.IsBotRunning = false;

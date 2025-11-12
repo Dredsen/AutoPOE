@@ -19,8 +19,10 @@ namespace AutoPOE.Logic.Actions
 
         public async Task<ActionResultType> Tick()
         {
-            var item = Core.Map.ClosestValidGroundItem;
-            if (item != null) return ActionResultType.Failure;
+            if (Core.Map.ClosestValidGroundItem != null)
+            {
+                return ActionResultType.Exception;
+            }
 
             var playerPos = Core.GameController.Player.GridPosNum;
             var monolith = Core.GameController.EntityListWrapper.OnlyValidEntities.FirstOrDefault(I => I.Metadata.Contains("Objects/Afflictionator"));
