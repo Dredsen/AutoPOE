@@ -49,7 +49,6 @@ namespace AutoPOE.Logic.Sequences
             if (!SimulacrumState.MonolithPosition.HasValue)
                 return new ExploreAction();
 
-
             if (Core.Map.ClosestValidGroundItem != null)
                 return new LootAction();
 
@@ -57,15 +56,14 @@ namespace AutoPOE.Logic.Sequences
                 (CanUseIncubators() || GetStorableInventoryCount >= Core.Settings.StoreItemThreshold))
                 return new StoreItemsAction();
 
-            if (Core.ShouldReviveMercenary() && DateTime.Now > Core.NextReviveMercAt)
-                return new ReviveMercenaryAction();
-
             if (SimulacrumState.IsWaveActive)
                 return Core.Map.ClosestTargetableMonster != null ? new CombatAction() : new ExploreAction();
 
             else if (DateTime.Now > SimulacrumState.CanStartWaveAt)
                 return SimulacrumState.CurrentWave < 15 ? new StartWaveAction() : new LeaveMapAction();
 
+            if (Core.Map.ClosestValidGroundItem != null) // rare case where loot is on ground after wave doesnt get picked up still, don't know why
+                return new LootAction();
 
             return new IdleAction();
         }
