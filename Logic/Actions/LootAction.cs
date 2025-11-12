@@ -23,7 +23,7 @@ namespace AutoPOE.Logic.Actions
 
         // --- Fields for delayed loot spawning ---
         private DateTime _lootCheckCooldown = DateTime.MinValue;
-        private const int LOOT_COOLDOWN_MS = 1000;
+        private const int LOOT_COOLDOWN_MS = 7500;
 
         public async Task<ActionResultType> Tick()
         {
