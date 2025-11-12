@@ -7,6 +7,21 @@ namespace AutoPOE
     public static class Controls
     {
         private static Random random = new Random();
+        // Brings the game window to the foreground using Win32 API
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        /// <summary>
+        /// Brings the game window to the foreground (regain focus)
+        /// </summary>
+        public static void BringGameWindowToFront()
+        {
+            var windowHandle = Core.GameController.Window.Process.MainWindowHandle;
+            if (windowHandle != IntPtr.Zero)
+            {
+                SetForegroundWindow(windowHandle);
+            }
+        }
         public static Vector2 GetScreenByWorldPos(Vector3 worldPos)
         {
             return Core.GameController.IngameState.Camera.WorldToScreen(worldPos);

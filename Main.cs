@@ -35,7 +35,10 @@ namespace AutoPOE
 
         public override Job Tick()
         {
-            if (!Core.IsBotRunning || !Settings.Enable || !GameController.InGame || GameController.IsLoading)
+            if (!Core.IsBotRunning || !Settings.Enable || !GameController.InGame)
+                return null;
+
+            if (GameController.IsLoading)
                 return null;
 
             if (Core.CanUseAction)
@@ -51,7 +54,7 @@ namespace AutoPOE
 
                 }
             }
-                
+
             return base.Tick();
         }
 
@@ -62,7 +65,7 @@ namespace AutoPOE
 
             if (Settings.StartBot.PressedOnce())
             {
-                _scarabTraderSequence = new ScarabTraderSequence(); 
+                _scarabTraderSequence = new ScarabTraderSequence();
                 Core.IsBotRunning = !Core.IsBotRunning;
             }
 
@@ -101,6 +104,9 @@ namespace AutoPOE
             Core.AreaChanged();
             SimulacrumState.AreaChanged();
             Settings.ConfigureSkills();
+
+            // Bring window to front after area change
+            Controls.BringGameWindowToFront();
 
 
 
