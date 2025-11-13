@@ -2,6 +2,11 @@
 using ExileCore.PoEMemory.Components;
 using ExileCore.Shared.Helpers;
 using System.Numerics;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using System;
+using ExileCore;
 
 namespace AutoPOE.Navigation
 {
@@ -19,7 +24,6 @@ namespace AutoPOE.Navigation
             if (_nodes.Count < 2)
                 return;
 
-
             const float Epsilon = 0.001f;
             for (int i = _nodes.Count - 2; i >= 0; i--)
             {
@@ -28,39 +32,36 @@ namespace AutoPOE.Navigation
                     var currentSegmentDirection = Vector2.Normalize(_nodes[i + 1] - _nodes[i]);
                     var nextSegmentDirection = Vector2.Normalize(_nodes[i + 2] - _nodes[i + 1]);
                     var dotProduct = Vector2.Dot(currentSegmentDirection, nextSegmentDirection);
-                    // If the segments are almost collinear (dot product close to 1), remove the intermediate node.
+
                     if (Math.Abs(dotProduct - 1.0f) < Epsilon)
                         _nodes.RemoveAt(i + 1);
                 }
             }
         }
 
-
-
         public async Task FollowPath()
         {
-            //Forciby end the path so it must be re-calculated.
-            if(DateTime.Now > ExpiresAt)
+            if (DateTime.Now > ExpiresAt)
             {
                 _nodes.Clear();
                 return;
             }
 
-            if (IsFinished || Next == null) return;
+            if (IsFinished) return;
 
             var playerPos = Core.GameController.Player.GridPosNum;
 
-            if (_nodes.Count > 1 &&  playerPos.Distance(Next.Value) < 2)
-                _nodes.RemoveAt(0);           
+            while (!IsFinished && playerPos.Distance(Next.Value) < Core.Settings.NodeSize.Value)
+            {
+                _nodes.RemoveAt(0);
+            }
 
+            if (IsFinished) return;
 
             var skill = Core.Settings.GetNextMovementSkill();
-            
-            await Controls.UseKeyAtGridPos(_nodes.First(), skill); 
-
-            if (Core.GameController.Player.GridPosNum.Distance(_nodes.First()) < Core.Settings.NodeSize.Value)
-                _nodes.RemoveAt(0);
+            await Controls.UseKeyAtGridPos(_nodes.First(), skill);
         }
+
         public void Render()
         {
             if (IsFinished) return;
@@ -76,6 +77,13 @@ namespace AutoPOE.Navigation
                 return;
             }
 
+            if (nodesToRender.Count == 0) return;
+
+            var playerPos = Core.GameController.Player.GridPosNum;
+            var p1_active = Controls.GetScreenByGridPos(playerPos);
+            var p2_active = Controls.GetScreenByGridPos(nodesToRender[0]);
+            Core.Graphics.DrawLine(p1_active, p2_active, 2, SharpDX.Color.Green);
+
             for (int i = 0; i < nodesToRender.Count - 1; i++)
             {
                 var p1 = Controls.GetScreenByGridPos(nodesToRender[i]);
@@ -83,6 +91,5 @@ namespace AutoPOE.Navigation
                 Core.Graphics.DrawLine(p1, p2, 2, SharpDX.Color.White);
             }
         }
-
     }
 }
