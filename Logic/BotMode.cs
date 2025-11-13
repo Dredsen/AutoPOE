@@ -9,6 +9,7 @@ namespace AutoPOE.Logic
     public enum BotMode
     {
         Simulacrum,
-        ScarabTrader
+        ScarabTrader,
+        Debug
     }
 }

@@ -15,9 +15,10 @@ namespace AutoPOE
     public class Main : BaseSettingsPlugin<Settings>
     {
         private bool _wasInSimulacrum = false;
-        private ISequence _sequence;
+        private ISequence? _sequence;
 
         private ISequence _scarabTraderSequence = new ScarabTraderSequence();
+        private ISequence _debugSequence = new DebugSequence();
         public override bool Initialise()
         {
             this.Name = "Auto POE";
@@ -35,8 +36,11 @@ namespace AutoPOE
 
         public override Job Tick()
         {
-            if (!Core.IsBotRunning || !Settings.Enable || !GameController.InGame || GameController.IsLoading)
-                return null;
+            if (!Core.IsBotRunning || !Settings.Enable || !GameController.InGame)
+                return base.Tick();
+
+            if (GameController.IsLoading)
+                return base.Tick();
 
             if (Core.CanUseAction)
             {
@@ -48,10 +52,13 @@ namespace AutoPOE
                     case "ScarabTrader":
                         _scarabTraderSequence?.Tick();
                         break;
+                    case "Debug":
+                        _debugSequence?.Tick();
+                        break;
 
                 }
             }
-                
+
             return base.Tick();
         }
 
@@ -62,7 +69,7 @@ namespace AutoPOE
 
             if (Settings.StartBot.PressedOnce())
             {
-                _scarabTraderSequence = new ScarabTraderSequence(); 
+                _scarabTraderSequence = new ScarabTraderSequence();
                 Core.IsBotRunning = !Core.IsBotRunning;
             }
 
@@ -74,23 +81,30 @@ namespace AutoPOE
                 case "ScarabTrader":
                     _scarabTraderSequence?.Render();
                     break;
+                case "Debug":
+                    _debugSequence?.Render();
+                    break;
             }
 
             var drawPos = new System.Numerics.Vector2(100, 200);
-            if (!GameController.Area.CurrentArea.IsHideout)
-            {
-                Graphics.DrawText($"Current Wave: {SimulacrumState.CurrentWave} / 15", drawPos, SharpDX.Color.White);
-                drawPos.Y += 20;
-                Graphics.DrawText($"Current Duration: {SimulacrumState.CurrentRunDuration:mm\\:ss}", drawPos, SharpDX.Color.White);
-                drawPos.Y += 20;
-            }
 
-            Graphics.DrawText($"Total Runs: {SimulacrumState.TotalRunsCompleted}", drawPos, SharpDX.Color.White);
-            drawPos.Y += 20;
-            Graphics.DrawText($"Avg. Time: {TimeSpan.FromSeconds(SimulacrumState.AverageTimePerRun):mm\\:ss}", drawPos, SharpDX.Color.White);
+            if (Core.Settings.FarmMethod == "Simulacrum")
+            {
+                if (!GameController.Area.CurrentArea.IsHideout)
+                {
+                    Graphics.DrawText($"Current Wave: {SimulacrumState.CurrentWave} / 15", drawPos, SharpDX.Color.White);
+                    drawPos.Y += 20;
+                    Graphics.DrawText($"Current Duration: {SimulacrumState.CurrentRunDuration:mm\\:ss}", drawPos, SharpDX.Color.White);
+                    drawPos.Y += 20;
+                }
+
+                Graphics.DrawText($"Total Runs: {SimulacrumState.TotalRunsCompleted}", drawPos, SharpDX.Color.White);
+                drawPos.Y += 20;
+                Graphics.DrawText($"Avg. Time: {TimeSpan.FromSeconds(SimulacrumState.AverageTimePerRun):mm\\:ss}", drawPos, SharpDX.Color.White);
+            }
         }
 
-        public override void AreaChange(AreaInstance area)
+        async public override void AreaChange(AreaInstance area)
         {
             var isInSimulacrum = !area.IsHideout;
             if (_wasInSimulacrum && !isInSimulacrum)
@@ -101,6 +115,10 @@ namespace AutoPOE
             Core.AreaChanged();
             SimulacrumState.AreaChanged();
             Settings.ConfigureSkills();
+
+            // Bring window to front after area change
+            await Task.Delay(100);
+            Controls.BringGameWindowToFront();
 
 
 
