@@ -56,7 +56,7 @@ namespace AutoPOE.Navigation
 
             var skill = Core.Settings.GetNextMovementSkill();
             
-            await Controls.UseKeyAtGridPos(_nodes.First(), skill);
+            await Controls.UseKeyAtGridPos(_nodes.First(), skill); 
 
             if (Core.GameController.Player.GridPosNum.Distance(_nodes.First()) < Core.Settings.NodeSize.Value)
                 _nodes.RemoveAt(0);
@@ -65,11 +65,21 @@ namespace AutoPOE.Navigation
         {
             if (IsFinished) return;
             var camera = Core.GameController.IngameState.Camera;
-            for (int i = 0; i < _nodes.Count - 1; i++)
+
+            List<Vector2> nodesToRender;
+            try
             {
-                
-                var p1 = Controls.GetScreenByGridPos(_nodes[i]);
-                var p2 = Controls.GetScreenByGridPos(_nodes[i + 1]);
+                nodesToRender = _nodes.ToList();
+            }
+            catch (Exception)
+            {
+                return;
+            }
+
+            for (int i = 0; i < nodesToRender.Count - 1; i++)
+            {
+                var p1 = Controls.GetScreenByGridPos(nodesToRender[i]);
+                var p2 = Controls.GetScreenByGridPos(nodesToRender[i + 1]);
                 Core.Graphics.DrawLine(p1, p2, 2, SharpDX.Color.White);
             }
         }
