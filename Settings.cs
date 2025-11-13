@@ -205,7 +205,6 @@ namespace AutoPOE
                 TargetRareMonster,
                 TargetUniqueMonster,
                 TargetSelf,
-                TargetMercenary
             }
         }
 

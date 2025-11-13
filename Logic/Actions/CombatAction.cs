@@ -18,7 +18,6 @@ namespace AutoPOE.Logic.Actions
         {
             await DetonateMines();
             await CastTargetSelfSpells();
-            await CastTargetMercenarySpells();
             await CastTargetMonsterSpells();
 
             var playerPos = Core.GameController.Player.GridPosNum;
@@ -59,19 +58,6 @@ namespace AutoPOE.Logic.Actions
             if (!Core.Settings.ShouldDetonateMines) return false;
             await Controls.UseKeyAtGridPos(Core.GameController.Player.GridPosNum, Core.Settings.DetonateMinesKey.Value);
             await Task.Delay(Core.Settings.ActionFrequency);
-            return true;
-        }
-
-        private async Task<bool> CastTargetMercenarySpells()
-        {
-            var merc = Core.GameController.EntityListWrapper.ValidEntitiesByType[EntityType.Monster]
-                .FirstOrDefault(m => m.IsAlive && m.IsTargetable && !m.IsHostile && m.GridPosNum.Distance(Core.GameController.Player.GridPosNum) <= Core.Settings.ViewDistance);
-            if (merc == null) return false;
-
-            var skill = Core.Settings.GetNextCombatSkill(Settings.Skill.CastTypeSort.TargetMercenary);
-            if (skill == null) return false;
-
-            await Controls.UseKeyAtGridPos(merc.GridPosNum, skill.Hotkey.Value);
             return true;
         }
 
