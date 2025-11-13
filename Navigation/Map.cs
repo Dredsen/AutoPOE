@@ -10,16 +10,25 @@ using GameOffsets;
 using GameOffsets.Native;
 using System.Collections.Concurrent;
 using System.Numerics;
+using System.Collections.Generic;
+using System.Linq;
+using System;
 
 namespace AutoPOE.Navigation
 {
     public class Map
     {
         private Random _random = new Random();
-        private List<uint> _blacklistItemIds = [];
+
+        // Use HashSet much faster than List<T>
+        private HashSet<uint> _blacklistItemIds = new HashSet<uint>();
+
         private readonly WorldGrid _worldGrid;
         private readonly PathFinder _pathFinder;
-        private readonly ConcurrentDictionary<string, List<Vector2>> _tiles;
+
+        // Use ConcurrentBag for thread-safe additions during parallel processing, should fix crash
+        private readonly ConcurrentDictionary<string, ConcurrentBag<Vector2>> _tiles;
+
         private Chunk[,] _chunks;
 
         public IReadOnlyList<Chunk> Chunks { get; private set; }
@@ -46,20 +55,13 @@ namespace AutoPOE.Navigation
             });
 
             PopulateWorldGrid(terrain, _worldGrid, Core.GameController.Memory);
-            ProcessTileData(terrain, _tiles = new ConcurrentDictionary<string, List<Vector2>>(), Core.GameController.Memory);
+            ProcessTileData(terrain, _tiles = new ConcurrentDictionary<string, ConcurrentBag<Vector2>>(), Core.GameController.Memory);
             InitializeChunks(10, _worldGrid.Width, _worldGrid.Height);
 
-            // Initialize the read-only Chunks list once after _chunks array is populated.
             Chunks = _chunks.Cast<Chunk>().ToList().AsReadOnly();
         }
 
 
-        /// <summary>
-        /// Populates the WorldGrid based on terrain melee layer data.
-        /// </summary>
-        /// <param name="terrain">The terrain data.</param>
-        /// <param name="worldGrid">The world grid to populate.</param>
-        /// <param name="memory">The memory accessor.</param>
         private static void PopulateWorldGrid(TerrainData terrain, WorldGrid worldGrid, IMemory memory)
         {
             byte[] layerMeleeBytes = memory.ReadBytes(terrain.LayerMelee.First, terrain.LayerMelee.Size);
@@ -80,16 +82,10 @@ namespace AutoPOE.Navigation
             }
         }
 
-        /// <summary>
-        /// Gets the tile detail to locate key objects for pathfinding (such as boss rooms,league mechanics, etc). 
-        /// </summary>
-        /// <param name="terrain"></param>
-        /// <param name="tiles"></param>
-        /// <param name="memory"></param>
-        private static void ProcessTileData(TerrainData terrain, ConcurrentDictionary<string, List<Vector2>> tiles, IMemory memory)
+        private static void ProcessTileData(TerrainData terrain, ConcurrentDictionary<string, ConcurrentBag<Vector2>> tiles, IMemory memory)
         {
             TileStructure[] tileData = memory.ReadStdVector<TileStructure>(terrain.TgtArray);
-            Parallel.ForEach(Partitioner.Create(0, tileData.Length), (range, loopState) =>
+            System.Threading.Tasks.Parallel.ForEach(Partitioner.Create(0, tileData.Length), (range, loopState) =>
             {
                 for (int i = range.Item1; i < range.Item2; i++)
                 {
@@ -102,23 +98,16 @@ namespace AutoPOE.Navigation
                     );
 
                     if (!string.IsNullOrEmpty(tilePath))
-                        tiles.GetOrAdd(tilePath, _ => new List<Vector2>())
+                        tiles.GetOrAdd(tilePath, _ => new ConcurrentBag<Vector2>())
                         .Add(tileGridPosition);
 
                     if (!string.IsNullOrEmpty(detailName))
-                        tiles.GetOrAdd(detailName, _ => new List<Vector2>())
+                        tiles.GetOrAdd(detailName, _ => new ConcurrentBag<Vector2>())
                         .Add(tileGridPosition);
-
                 }
             });
         }
 
-        /// <summary>
-        /// Initializes the chunk grid for map exploration.
-        /// </summary>
-        /// <param name="chunkResolution">The resolution of each chunk.</param>
-        /// <param name="worldGridWidth">The width of the world grid.</param>
-        /// <param name="worldGridHeight">The height of the world grid.</param>
         private void InitializeChunks(int chunkResolution, int worldGridWidth, int worldGridHeight)
         {
             int chunksX = (int)Math.Ceiling((double)worldGridWidth / chunkResolution);
@@ -155,21 +144,16 @@ namespace AutoPOE.Navigation
             }
         }
 
-        /// <summary>
-        /// Get the position for a tile (direct match or contains) closest to the player.
-        /// </summary>
-        /// <param name="searchString"></param>
-        /// <returns></returns>
         public Vector2? FindTilePositionByName(string searchString)
         {
             var playerPos = Core.GameController.Player.GridPosNum;
 
-            if (_tiles.TryGetValue(searchString, out var results) && results.Any())
+            if (_tiles.TryGetValue(searchString, out var results) && !results.IsEmpty)
                 return results.OrderBy(I => playerPos.Distance(I))
                     .FirstOrDefault();
 
             var matchingPair = _tiles.FirstOrDefault(kvp => kvp.Key.Contains(searchString));
-            return matchingPair.Key != null && matchingPair.Value.Any()
+            return matchingPair.Key != null && !matchingPair.Value.IsEmpty
                 ? (Vector2?)matchingPair.Value.OrderBy(I => playerPos.Distance(I))
                     .FirstOrDefault()
                 : null;
@@ -196,9 +180,9 @@ namespace AutoPOE.Navigation
         public Chunk? GetNextUnrevealedChunk()
         {
             return Chunks
-                .Where(c => !c.IsRevealed && c.Weight > 0) 
+                .Where(c => !c.IsRevealed && c.Weight > 0)
                 .OrderBy(c => c.Position.Distance(Core.GameController.Player.GridPosNum))
-                .ThenByDescending(c => c.Weight) 
+                .ThenByDescending(c => c.Weight)
                 .FirstOrDefault();
         }
 
@@ -211,26 +195,10 @@ namespace AutoPOE.Navigation
                 return null;
             }
 
-            // Convert Point[] to List<Vector2> directly
             List<Vector2> pathVectors = new List<Vector2>(pathPoints.Length);
             foreach (Point p in pathPoints)
                 pathVectors.Add(new Vector2((float)p.X, (float)p.Y));
 
-
-            var cleanedNodes = new List<Vector2> { pathVectors[0] };
-            var lastKeptNode = pathVectors[0];
-
-            for (int i = 1; i < pathVectors.Count - 1; i++)
-            {
-                var currentNode = pathVectors[i];
-                if (Vector2.Distance(currentNode, lastKeptNode) >= Core.Settings.NodeSize)
-                {
-                    cleanedNodes.Add(currentNode);
-                    lastKeptNode = currentNode;
-                }
-            }
-            cleanedNodes.Add(pathVectors.Last());
-            pathVectors = cleanedNodes;
             return new Path(pathVectors);
         }
 
@@ -239,15 +207,41 @@ namespace AutoPOE.Navigation
         private T? FindClosestGeneric<T>(IEnumerable<T> source, Func<T, bool> predicate, Func<T, float> distanceSelector) where T : class
         {
             return source.Where(predicate)
-                .OrderBy(I => _random.Next())
+                .OrderBy(I => _random.Next()) // Why are we using random here?
                 .MinBy(distanceSelector);
         }
 
+        // Caching for performance and possible crash from threading issues
+        private (DateTime Timestamp, ItemsOnGroundLabelElement.VisibleGroundItemDescription? Item) _cachedClosestItem;
+        private (DateTime Timestamp, Entity? Monster) _cachedClosestMonster;
+        private const int CACHE_DURATION_MS = 10;
 
-        public Entity? ClosestTargetableMonster =>
-            FindClosestGeneric(Core.GameController.EntityListWrapper.ValidEntitiesByType[EntityType.Monster],
-            monster => monster.IsAlive && monster.IsTargetable && monster.IsHostile && !monster.IsDead,
-            monster => monster.DistancePlayer);
+        public Entity? ClosestTargetableMonster
+        {
+            get
+            {
+                // If cache is still valid, return cached value
+                if (DateTime.Now < _cachedClosestMonster.Timestamp.AddMilliseconds(CACHE_DURATION_MS))
+                    return _cachedClosestMonster.Monster;
+
+                Entity? monster = null;
+                try
+                {
+                    // Prevents crashes if the collection is modified by another thread
+                    monster = FindClosestGeneric(Core.GameController.EntityListWrapper.ValidEntitiesByType[EntityType.Monster],
+                        m => m.IsAlive && m.IsTargetable && m.IsHostile && !m.IsDead,
+                        m => m.DistancePlayer);
+                }
+                catch (Exception)
+                {
+                    // Might need to add a log if this happens a lot
+                }
+
+                _cachedClosestMonster = (DateTime.Now, monster);
+                return monster;
+            }
+        }
+
 
         public (Vector2 Position, float Weight) FindBestFightingPosition()
         {
@@ -256,7 +250,7 @@ namespace AutoPOE.Navigation
             var bestWeight = GetPositionFightWeight(bestPos);
 
             var candidateMonsters = Core.GameController.EntityListWrapper.ValidEntitiesByType[EntityType.Monster]
-                .Where(m => m.IsHostile && m.IsAlive && m.GridPosNum.Distance(playerPos) >Core.Settings.CombatDistance.Value * 1);
+                .Where(m => m.IsHostile && m.IsAlive && m.GridPosNum.Distance(playerPos) > Core.Settings.CombatDistance.Value * 1);
 
             foreach (var monster in candidateMonsters)
             {
@@ -291,29 +285,42 @@ namespace AutoPOE.Navigation
             };
         }
 
-
-        /// <summary>
-        /// Blacklist an item so it is not considered when using ClosestValidGroundItem.
-        ///     This collection is cleared between area changes. 
-        /// </summary>
-        /// <param name="id"></param>
         public void BlacklistItemId(uint id)
         {
-            if (!_blacklistItemIds.Contains(id))
-                _blacklistItemIds.Add(id);
+            _blacklistItemIds.Add(id);
         }
 
 
-        public ItemsOnGroundLabelElement.VisibleGroundItemDescription? ClosestValidGroundItem =>            
-            FindClosestGeneric(Core.GameController.IngameState.IngameUi.ItemsOnGroundLabelElement.VisibleGroundItemLabels,
-                item => item != null &&
-                        item.Label != null &&
-                        item.Entity != null &&
-                        item.Label.IsVisibleLocal &&
-                        item.Label.Text != null &&
-                        !item.Label.Text.EndsWith(" Gold") &&
-                        !_blacklistItemIds.Contains(item.Entity.Id),
-                item => item.Entity.DistancePlayer);
+        public ItemsOnGroundLabelElement.VisibleGroundItemDescription? ClosestValidGroundItem
+        {
+            get
+            {
+                if (DateTime.Now < _cachedClosestItem.Timestamp.AddMilliseconds(CACHE_DURATION_MS))
+                    return _cachedClosestItem.Item;
+
+                ItemsOnGroundLabelElement.VisibleGroundItemDescription? item = null;
+                try
+                {
+                    // Prevents crashes if the collection is modified by another thread
+                    item = FindClosestGeneric(Core.GameController.IngameState.IngameUi.ItemsOnGroundLabelElement.VisibleGroundItemLabels,
+                        i => i != null &&
+                             i.Label != null &&
+                             i.Entity != null &&
+                             i.Label.IsVisibleLocal &&
+                             i.Label.Text != null &&
+                             !i.Label.Text.EndsWith(" Gold") &&
+                             !_blacklistItemIds.Contains(i.Entity.Id), // O(1) check
+                        i => i.Entity.DistancePlayer);
+                }
+                catch (Exception)
+                {
+                    // Again need to log if this happens a lot
+                }
+
+                _cachedClosestItem = (DateTime.Now, item);
+                return item;
+            }
+        }
 
 
         public Vector2 GetSimulacrumCenter()
