@@ -5,10 +5,12 @@ using ExileCore.PoEMemory.Elements;
 using ExileCore.Shared.Enums;
 using ExileCore.Shared.Helpers;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Forms;
 
 namespace AutoPOE.Logic.Actions
 {
@@ -54,6 +56,7 @@ namespace AutoPOE.Logic.Actions
                 return ActionResultType.Success;
             }
 
+            // --- 1. Movement ---
             if (_currentPath != null && !_currentPath.IsFinished)
             {
                 await _currentPath.FollowPath();
@@ -67,7 +70,7 @@ namespace AutoPOE.Logic.Actions
                 return ActionResultType.Running;
             }
 
-            //Open stash if not open.
+            // --- 2. Open Stash ---
             if (!IsStashOpen)
             {
                 var stashObj = Core.GameController.EntityListWrapper.OnlyValidEntities.FirstOrDefault(I => I.Metadata.Contains("Metadata/MiscellaneousObjects/Stash"));
@@ -75,31 +78,67 @@ namespace AutoPOE.Logic.Actions
 
                 await Controls.ClickScreenPos(Controls.GetScreenByGridPos(stashObj.GridPosNum));
                 await Task.Delay(300);
+
+                if (!IsStashOpen) return ActionResultType.Running;
             }
 
-            //If stash failed to open, exit out.
-            if (!IsStashOpen) return ActionResultType.Exception;
-
-            foreach (var item in playerInventory)
+            // --- 3. Store Items ---
+            if (Core.GameController.IngameState.IngameUi.Cursor.Action == MouseActionType.HoldItem)
             {
-                if (!Core.GameController.IngameState.IngameUi.InventoryPanel.IsVisible) return ActionResultType.Failure;
-                var center = item.GetClientRect().Center;
-                await Controls.ClickScreenPos(new Vector2(center.X, center.Y), isLeft: true, exactPosition: false, holdCtrl: true);
-                await Task.Delay(Core.Settings.ActionFrequency);
-                SimulacrumState.StoreItemAttemptCount++;
+                var invCenter = Core.GameController.IngameState.IngameUi.InventoryPanel.GetClientRect().Center;
+                await Controls.ClickScreenPos(new Vector2(invCenter.X, invCenter.Y), isLeft: true, exactPosition: false, holdCtrl: false);
+                await Task.Delay(100);
+                return ActionResultType.Running;
             }
 
-            if (Core.Settings.UseIncubators)
-                while (await ApplyAnyIncubator())                
-                    await Task.Delay(400);
+            // We use .ToList() to create a static copy, otherwise the loop skips items
+            foreach (var item in playerInventory.ToList())
+            {
+                if (!Core.GameController.IngameState.IngameUi.InventoryPanel.IsVisible)
+                    return ActionResultType.Failure;
 
-            return ActionResultType.Success;
+                var center = item.GetClientRect().Center;
+                var itemCenterVec = new Vector2(center.X, center.Y);
+
+                ExileCore.Input.KeyDown(Keys.ControlKey);
+                await Task.Delay(50);
+
+                await Controls.ClickScreenPos(itemCenterVec, isLeft: true, exactPosition: false, holdCtrl: false);
+                await Task.Delay(Core.Settings.ActionFrequency);
+
+                ExileCore.Input.KeyUp(Keys.ControlKey);
+
+                SimulacrumState.StoreItemAttemptCount++;
+
+                if (Core.GameController.IngameState.IngameUi.Cursor.Action == MouseActionType.HoldItem)
+                {
+                    // Failed Ctrl+Click, drop item back
+                    await Controls.ClickScreenPos(itemCenterVec, isLeft: true, exactPosition: false, holdCtrl: false);
+                    await Task.Delay(100);
+                    return ActionResultType.Running;
+                }
+
+                await Task.Delay(50);
+            }
+
+            // --- 4. Apply Incubators ---
+            if (Core.Settings.UseIncubators)
+            {
+                while (await ApplyAnyIncubator())
+                {
+                    await Task.Delay(400);
+                }
+            }
+
+            return ActionResultType.Running;
         }
 
+        bool IsFinished => Core.GameController.IngameState.Data.ServerData.PlayerInventories[0].Inventory.InventorySlotItems.Count == 0
+                            && (!Core.Settings.UseIncubators
+                                || FindEmptyEquipmentSlot() == null
+                                || FindIncubatorInStash() == null);
 
-        // Action is finished if inventory is empty and either no equipment can accept incubators OR no incubators remain in stash.
-        bool IsFinished => Core.GameController.IngameState.Data.ServerData.PlayerInventories[0].Inventory.InventorySlotItems.Count == 0 && (FindEmptyEquipmentSlot() == null || FindIncubatorInStash() == null);
-        bool IsStashOpen => Core.GameController.IngameState.IngameUi.InventoryPanel.IsVisible;
+        bool IsStashOpen => Core.GameController.IngameState.IngameUi.StashElement.IsVisible;
 
         private async Task<bool> ApplyAnyIncubator()
         {
@@ -115,9 +154,8 @@ namespace AutoPOE.Logic.Actions
 
             await Controls.ClickScreenPos(EquipmentSlotPositions[targetSlot.Value]);
 
-            if(Core.GameController.IngameState.IngameUi.Cursor.Action == MouseActionType.HoldItem)
+            if (Core.GameController.IngameState.IngameUi.Cursor.Action == MouseActionType.HoldItem)
             {
-                //We picked up our equipment. Emergency stop!
                 Core.IsBotRunning = false;
                 return false;
             }
@@ -145,7 +183,9 @@ namespace AutoPOE.Logic.Actions
         private InventorySlotE? FindEmptyEquipmentSlot()
         {
             var equipment = Core.GameController.IngameState.ServerData.PlayerInventories
-                .Where(inv => inv.Inventory.InventSlot >= InventorySlotE.BodyArmour1 && inv.Inventory.InventSlot <= InventorySlotE.Belt1 && inv.Inventory.Items.Count == 1)
+                .Where(inv => inv.Inventory.InventSlot >= InventorySlotE.BodyArmour1
+                            && inv.Inventory.InventSlot <= InventorySlotE.Belt1
+                            && inv.Inventory.Items.Count == 1)
                 .Select(inv => inv.Inventory)
                 .ToList();
 
@@ -165,6 +205,7 @@ namespace AutoPOE.Logic.Actions
 
             return center == null ? null : new Vector2(center.Value.X, center.Value.Y);
         }
+
         public void Render() { }
     }
 }

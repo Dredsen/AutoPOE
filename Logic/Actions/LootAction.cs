@@ -2,8 +2,144 @@
 using ExileCore.Shared.Helpers;
 using System.ComponentModel.Design;
 using System.Numerics;
+using AutoPOE.Logic;
+using System.Threading.Tasks;
+using System;
+using System.Windows.Forms;
+using ExileCore.Shared.Enums;
+using System.Linq;
+using ExileCore;
+
+namespace AutoPOE.Logic.Actions
+{
+    public class LootAction : IAction
+    {
+        private Navigation.Path? _currentPath;
+        private uint? _targetItemId;
+
+        // --- Fields for stuck item logic ---
+        private int _consecutiveFailedClicks = 0;
+        private const int MAX_FAILED_CLICKS = 3;
+
+        // --- Fields for delayed loot spawning ---
+        private DateTime _lootCheckCooldown = DateTime.MinValue;
+        private const int LOOT_COOLDOWN_MS = 7500;
+
+        public async Task<ActionResultType> Tick()
+        {
+            var item = Core.Map.ClosestValidGroundItem;
+            var playerPos = Core.GameController.Player.GridPosNum;
+
+            if (item == null)
+            {
+                if (_lootCheckCooldown == DateTime.MinValue)
+                {
+                    _lootCheckCooldown = DateTime.Now.AddMilliseconds(LOOT_COOLDOWN_MS);
+                    return ActionResultType.Running; // Wait
+                }
+
+                if (DateTime.Now < _lootCheckCooldown)
+                {
+                    return ActionResultType.Running; // Keep waiting
+                }
+
+                _lootCheckCooldown = DateTime.MinValue;
+                return ActionResultType.Success;
+            }
 
 
+
+            _lootCheckCooldown = DateTime.MinValue;
+
+            if (item.Entity.Id != _targetItemId)
+            {
+                _targetItemId = item.Entity.Id;
+                _currentPath = null;
+                _consecutiveFailedClicks = 0; // Reset fail counter for new item
+            }
+
+            // Original unstuck logic
+            if (Core.Settings.LootItemsUnstick && (DateTime.Now > SimulacrumState.LastMovedAt.AddSeconds(15) || DateTime.Now > SimulacrumState.LastToggledLootAt.AddSeconds(5)))
+            {
+                await Controls.UseKey(Keys.Z);
+                await Task.Delay(Core.Settings.ActionFrequency);
+                await Controls.UseKey(Keys.Z);
+                await Task.Delay(500);
+                SimulacrumState.LastToggledLootAt = DateTime.Now;
+            }
+
+            // Ensure loot labels are enabled
+            if (SimulacrumState.StashPosition != null &&
+                playerPos.Distance(SimulacrumState.StashPosition.Value) < Core.Settings.ViewDistance &&
+                !Core.GameController.IngameState.IngameUi.ItemsOnGroundLabelsVisible.Any(I => I.ItemOnGround != null && !string.IsNullOrEmpty(I.ItemOnGround.Metadata) && I.ItemOnGround.Metadata.Contains("Metadata/MiscellaneousObjects/Stash")))
+                await Controls.UseKey(Keys.Z);
+
+
+            // Check if we are close enough to click
+            if (playerPos.Distance(item.Entity.GridPosNum) < Core.Settings.NodeSize)
+            {
+                _currentPath = null;
+                _consecutiveFailedClicks++; // Item hasn't disappeared, count as a failed click
+
+                // Stuck item logic
+                if (_consecutiveFailedClicks >= MAX_FAILED_CLICKS)
+                {
+                    // Press Z twice to refresh loot labels
+                    await Controls.UseKey(Keys.Z);
+                    await Task.Delay(Core.Settings.ActionFrequency);
+                    await Controls.UseKey(Keys.Z);
+                    await Task.Delay(500); // Wait for labels to refresh
+
+                    _consecutiveFailedClicks = 0; // Reset counter
+                    return ActionResultType.Running; // Re-evaluate next tick
+                }
+
+                var labelCenter = item.ClientRect.Center;
+                await Controls.ClickScreenPos(new Vector2(labelCenter.X, labelCenter.Y));
+
+                // Return Running. We must wait for the *next tick* to confirm the item is gone.
+                return ActionResultType.Running;
+            }
+
+            // We are not close, so move to the item.
+            if (_currentPath == null)
+            {
+                _currentPath = Core.Map.FindPath(playerPos, item.Entity.GridPosNum);
+                if (_currentPath == null)
+                {
+                    // Path not found, blacklist and fail
+                    Core.Map.BlacklistItemId(_targetItemId.Value);
+                    _consecutiveFailedClicks = 0; // Reset counter
+                    return ActionResultType.Failure;
+                }
+            }
+
+            await _currentPath.FollowPath();
+            return ActionResultType.Running;
+        }
+
+        public void Render()
+        {
+            var possibleItems = Core.GameController.IngameState.IngameUi.ItemsOnGroundLabelElement.VisibleGroundItemLabels
+                .Where(item => item != null &&
+                               item.Label != null &&
+                               item.Entity != null &&
+                               item.Label.IsVisibleLocal &&
+                               item.Label.Text != null &&
+                               !item.Label.Text.EndsWith(" Gold"));
+
+            foreach (var item in possibleItems)
+                Core.Graphics.DrawCircle(new Vector2(item.ClientRect.Center.X, item.ClientRect.Center.Y), 10, SharpDX.Color.Pink);
+
+            Core.Graphics.DrawText($"Count: {possibleItems.Count()}  ID: {_targetItemId}", new Vector2(125, 125));
+            _currentPath?.Render();
+        }
+    }
+}
+
+
+/* 
+ * OLD CODE FOR REFERENCE
 namespace AutoPOE.Logic.Actions
 {
     public class LootAction : IAction
@@ -87,3 +223,4 @@ namespace AutoPOE.Logic.Actions
         }
     }
 }
+*/

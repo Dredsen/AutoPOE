@@ -7,6 +7,21 @@ namespace AutoPOE
     public static class Controls
     {
         private static Random random = new Random();
+        // Brings the game window to the foreground using Win32 API
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        /// <summary>
+        /// Brings the game window to the foreground (regain focus)
+        /// </summary>
+        public static void BringGameWindowToFront()
+        {
+            var windowHandle = Core.GameController.Window.Process.MainWindowHandle;
+            if (windowHandle != IntPtr.Zero)
+            {
+                SetForegroundWindow(windowHandle);
+            }
+        }
         public static Vector2 GetScreenByWorldPos(Vector3 worldPos)
         {
             return Core.GameController.IngameState.Camera.WorldToScreen(worldPos);
@@ -46,12 +61,24 @@ namespace AutoPOE
         }
         public static async Task ClosePanels()
         {
-            if(ReleaseAllModifierKeys())
+            if (ReleaseAllModifierKeys())
                 await Task.Delay(250);
 
             if (Core.GameController.IngameState.IngameUi.InventoryPanel.IsVisible ||
                 Core.GameController.IngameState.IngameUi.Cursor.Action == ExileCore.Shared.Enums.MouseActionType.UseItem)
                 await UseKey(Keys.Escape);
+        }
+
+        /// <summary>
+        /// Sets cursor position relative to the game window, making it resolution and window position independent
+        /// </summary>
+        private static void SetCursorPosWindowAware(Vector2 position)
+        {
+            var windowRect = Core.GameController.Window.GetWindowRectangle();
+            var absoluteX = (int)(windowRect.X + position.X);
+            var absoluteY = (int)(windowRect.Y + position.Y);
+
+            Input.SetCursorPos(new Vector2(absoluteX, absoluteY));
         }
 
 
@@ -60,7 +87,7 @@ namespace AutoPOE
             if (!exactPosition)
                 position += new Vector2((float)random.Next(-15, 15), (float)random.Next(-15, 15));
 
-            Input.SetCursorPos(position);
+            SetCursorPosWindowAware(position);
             await Task.Delay(random.Next(20, 50));
 
             if (holdCtrl)
@@ -87,7 +114,7 @@ namespace AutoPOE
             if (!exactPosition)
                 screenClampedGridPos += new Vector2((float)random.Next(-5, 5), (float)random.Next(-5, 5));
 
-            Input.SetCursorPos(screenClampedGridPos);
+            SetCursorPosWindowAware(screenClampedGridPos);
             await Task.Delay(random.Next(15, 30));
             await UseKey(key);
             Core.ActionPerformed();

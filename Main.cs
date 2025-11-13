@@ -15,7 +15,7 @@ namespace AutoPOE
     public class Main : BaseSettingsPlugin<Settings>
     {
         private bool _wasInSimulacrum = false;
-        private ISequence _sequence;
+        private ISequence? _sequence;
 
         private ISequence _scarabTraderSequence = new ScarabTraderSequence();
         public override bool Initialise()
@@ -35,8 +35,11 @@ namespace AutoPOE
 
         public override Job Tick()
         {
-            if (!Core.IsBotRunning || !Settings.Enable || !GameController.InGame || GameController.IsLoading)
-                return null;
+            if (!Core.IsBotRunning || !Settings.Enable || !GameController.InGame)
+                return base.Tick();
+
+            if (GameController.IsLoading)
+                return base.Tick();
 
             if (Core.CanUseAction)
             {
@@ -51,7 +54,7 @@ namespace AutoPOE
 
                 }
             }
-                
+
             return base.Tick();
         }
 
@@ -62,7 +65,7 @@ namespace AutoPOE
 
             if (Settings.StartBot.PressedOnce())
             {
-                _scarabTraderSequence = new ScarabTraderSequence(); 
+                _scarabTraderSequence = new ScarabTraderSequence();
                 Core.IsBotRunning = !Core.IsBotRunning;
             }
 
@@ -90,7 +93,7 @@ namespace AutoPOE
             Graphics.DrawText($"Avg. Time: {TimeSpan.FromSeconds(SimulacrumState.AverageTimePerRun):mm\\:ss}", drawPos, SharpDX.Color.White);
         }
 
-        public override void AreaChange(AreaInstance area)
+        async public override void AreaChange(AreaInstance area)
         {
             var isInSimulacrum = !area.IsHideout;
             if (_wasInSimulacrum && !isInSimulacrum)
@@ -101,6 +104,10 @@ namespace AutoPOE
             Core.AreaChanged();
             SimulacrumState.AreaChanged();
             Settings.ConfigureSkills();
+
+            // Bring window to front after area change
+            await Task.Delay(100);
+            Controls.BringGameWindowToFront();
 
 
 

@@ -51,9 +51,6 @@ namespace AutoPOE
         [Menu("Use Incubators", "Should we apply incubators (from stash) to our equipment?")]
         public ToggleNode UseIncubators { get; set; } = new ToggleNode(true);
 
-        [Menu("Revive Mercenary", "Should we revive our mercenary if they die?")]
-        public ToggleNode ReviveMercenary { get; set; } = new ToggleNode(false);
-
 
         [Menu("Hide/Show Loot (Unstuck)", "Should the bot double press the Z key to reposition loot icons? Can help if loot icons are off screen or unable to be clicked.")]
         public ToggleNode LootItemsUnstick { get; set; } = new ToggleNode(false);

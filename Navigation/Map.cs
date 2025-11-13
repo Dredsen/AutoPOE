@@ -323,7 +323,8 @@ namespace AutoPOE.Navigation
                 case "The Bridge Enraptured":
                     return new Vector2(551, 624);
                 case "Oriath Delusion":
-                    return new Vector2(587, 253);
+                    //return new Vector2(587, 253); Might still need
+                    return new Vector2(494, 288);
                 case "The Syndrome Encampment":
                     return new Vector2(316, 253);
                 case "Hysteriagate":

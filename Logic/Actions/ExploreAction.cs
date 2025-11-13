@@ -6,17 +6,24 @@ using System.Threading.Tasks;
 using System.Numerics;
 using AutoPOE.Navigation;
 using ExileCore.Shared.Helpers;
+using AutoPOE.Logic;
+using ExileCore;
+using ExileCore.Shared.Enums;
 
 namespace AutoPOE.Logic.Actions
-{    
+{
     public class ExploreAction : IAction
     {
+        private List<Vector2> _blacklistedChunks = new List<Vector2>();
+
+        // Failsafe fields
+        private int _consecutiveFailures = 0;
+        private const int MAX_CONSECUTIVE_FAILURES = 100; // Give up after 100 ticks of finding no valid path
+
         public ExploreAction()
         {
-            //Set all chunks to not having been revealed yet. Start exploring from 0.
             Core.Map.ResetAllChunks();
-
-            //Set our starting path to be to walk to center of the map.
+            _blacklistedChunks.Clear();
             _currentPath = Core.Map.FindPath(Core.GameController.Player.GridPosNum, Core.Map.GetSimulacrumCenter());
         }
 
@@ -32,20 +39,47 @@ namespace AutoPOE.Logic.Actions
             {
                 var nextPos = Core.GameController.Player.GridPosNum + new Vector2(_random.Next(-50, 50), _random.Next(-50, 50));
                 await Controls.UseKeyAtGridPos(nextPos, Core.Settings.GetNextMovementSkill());
-                return ActionResultType.Exception;
+                return ActionResultType.Running;
             }
 
             if (_currentPath != null && !_currentPath.IsFinished)
             {
                 await _currentPath.FollowPath();
+                _consecutiveFailures = 0; // We are on a valid path, reset counter
                 return ActionResultType.Running;
             }
 
+            // Path is finished or null, find a new target chunk
             var nextChunk = Core.Map.GetNextUnrevealedChunk();
             if (nextChunk == null)
-                return ActionResultType.Success;
+                return ActionResultType.Success; // No more chunks
+
+            // Check if chunk is blacklisted and skip if it is.
+            if (_blacklistedChunks.Contains(nextChunk.Position))
+            {
+                _consecutiveFailures++;
+                if (_consecutiveFailures > MAX_CONSECUTIVE_FAILURES)
+                {
+                    _blacklistedChunks.Clear(); // Clear for next run
+                    return ActionResultType.Success; // Got stuck
+                }
+                return ActionResultType.Running; // Go next tick and skip the chunk 
+            }
 
             _currentPath = Core.Map.FindPath(Core.GameController.Player.GridPosNum, nextChunk.Position);
+
+            if (_currentPath == null)
+            {
+                // couldnt find good path, blacklist this chunk
+                _blacklistedChunks.Add(nextChunk.Position);
+                _consecutiveFailures++;
+            }
+            else
+            {
+                // We found a new valid path
+                _consecutiveFailures = 0;
+            }
+
             return ActionResultType.Running;
         }
 
