@@ -87,16 +87,7 @@ namespace AutoPOE.Logic.Actions
                 if (!IsStashOpen) return ActionResultType.Running;
             }
 
-            // --- 3. Ues Incubators ---
-            if (Core.Settings.UseIncubators)
-            {
-                while (await ApplyAnyIncubator())
-                {
-                    await Task.Delay(400);
-                }
-            }
-
-            // --- 4. Store Items ---
+            // --- 3. Store Items ---
             if (Core.GameController.IngameState.IngameUi.Cursor.Action == MouseActionType.HoldItem)
             {
                 var invCenter = Core.GameController.IngameState.IngameUi.InventoryPanel.GetClientRect().Center;
@@ -135,6 +126,14 @@ namespace AutoPOE.Logic.Actions
                 await Task.Delay(50);
             }
 
+            // --- 4. Apply Incubators ---
+            if (Core.Settings.UseIncubators)
+            {
+                while (await ApplyAnyIncubator())
+                {
+                    await Task.Delay(400);
+                }
+            }
 
             return ActionResultType.Running;
         }
@@ -207,7 +206,7 @@ namespace AutoPOE.Logic.Actions
         private Vector2? FindIncubatorInStash()
         {
             var center = Core.GameController.IngameState.IngameUi.StashElement.VisibleStash?.VisibleInventoryItems
-                .FirstOrDefault(item => item.Entity.Path.Contains("/CurrencyIncubation"))?.GetClientRect().Center;
+                .FirstOrDefault(item => item.TextureName.Contains("Incubation/"))?.GetClientRect().Center;
 
             return center == null ? null : new Vector2(center.Value.X, center.Value.Y);
         }
