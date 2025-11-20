@@ -207,7 +207,7 @@ namespace AutoPOE.Navigation
         private T? FindClosestGeneric<T>(IEnumerable<T> source, Func<T, bool> predicate, Func<T, float> distanceSelector) where T : class
         {
             return source.Where(predicate)
-                .OrderBy(I => _random.Next()) // Why are we using random here?
+                //.OrderBy(I => _random.Next()) // Disabled now, was causing issues not sure why it was in to begin with
                 .MinBy(distanceSelector);
         }
 
