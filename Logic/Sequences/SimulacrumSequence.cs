@@ -3,7 +3,10 @@ using ExileCore;
 using ExileCore.PoEMemory.Components;
 using ExileCore.Shared.Enums;
 using ExileCore.Shared.Helpers;
+using System;
+using System.Linq;
 using System.Numerics;
+using System.Threading.Tasks;
 
 namespace AutoPOE.Logic.Sequences
 {
@@ -16,27 +19,28 @@ namespace AutoPOE.Logic.Sequences
         {
             SimulacrumState.Tick();
             var nextAction = GetNextAction();
+
             if (_currentAction == null || _currentAction.GetType() != nextAction.GetType())
             {
                 _currentAction = nextAction;
                 _currentTask = _currentAction.Tick();
             }
+
             if (_currentTask == null || _currentTask.IsCompleted)
             {
                 if (_currentTask?.Result == ActionResultType.Success || _currentTask?.Result == ActionResultType.Failure)
                     _currentAction = GetNextAction();
+
                 _currentTask = _currentAction.Tick();
             }
         }
-
 
         public void Render()
         {
             var actionName = _currentAction?.GetType().Name ?? "None";
             Core.Graphics.DrawText($"Running: {Core.IsBotRunning} Current Action: {actionName}. {SimulacrumState.DebugText}", new Vector2(100, 100), SharpDX.Color.White);
-             _currentAction?.Render();
+            _currentAction?.Render();
         }
-
 
         private IAction GetNextAction()
         {
@@ -56,8 +60,30 @@ namespace AutoPOE.Logic.Sequences
                 (CanUseIncubators() || GetStorableInventoryCount >= Core.Settings.StoreItemThreshold && Core.Map.ClosestValidGroundItem == null))
                 return new StoreItemsAction();
 
+            if (!SimulacrumState.IsWaveActive && SimulacrumState.MonolithPosition.HasValue)
+            {
+                var distToMonolith = Core.GameController.Player.Distance(SimulacrumState.MonolithPosition.Value);
+                if (distToMonolith > 100)
+                    return new ExploreAction();
+            }
+
             if (SimulacrumState.IsWaveActive && Core.Map.ClosestValidGroundItem == null)
-                return Core.Map.ClosestTargetableMonster != null ? new CombatAction() : new ExploreAction();
+            {
+                var target = Core.Map.ClosestTargetableMonster;
+
+                if (target != null)
+                {
+                    if (_currentAction is CombatAction)
+                        return new CombatAction();
+
+                    if (target.DistancePlayer < 100)
+                        return new CombatAction();
+
+                    return new ExploreAction();
+                }
+
+                return new ExploreAction();
+            }
 
             else if (DateTime.Now > SimulacrumState.CanStartWaveAt && Core.Map.ClosestValidGroundItem == null)
                 return SimulacrumState.CurrentWave < 15 ? new StartWaveAction() : new LeaveMapAction();
@@ -65,9 +91,7 @@ namespace AutoPOE.Logic.Sequences
             return new IdleAction();
         }
 
-
         private static int GetStorableInventoryCount => Core.GameController.IngameState.Data.ServerData.PlayerInventories[0].Inventory.InventorySlotItems.Count;
-
 
         private bool CanUseIncubators()
         {
