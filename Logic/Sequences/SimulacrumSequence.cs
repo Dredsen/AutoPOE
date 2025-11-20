@@ -60,13 +60,6 @@ namespace AutoPOE.Logic.Sequences
                 (CanUseIncubators() || GetStorableInventoryCount >= Core.Settings.StoreItemThreshold && Core.Map.ClosestValidGroundItem == null))
                 return new StoreItemsAction();
 
-            if (!SimulacrumState.IsWaveActive && SimulacrumState.MonolithPosition.HasValue)
-            {
-                var distToMonolith = Core.GameController.Player.Distance(SimulacrumState.MonolithPosition.Value);
-                if (distToMonolith > 100)
-                    return new ExploreAction();
-            }
-
             if (SimulacrumState.IsWaveActive && Core.Map.ClosestValidGroundItem == null)
             {
                 var target = Core.Map.ClosestTargetableMonster;
@@ -76,7 +69,7 @@ namespace AutoPOE.Logic.Sequences
                     if (_currentAction is CombatAction)
                         return new CombatAction();
 
-                    if (target.DistancePlayer < 100)
+                    if (target.DistancePlayer < 150)
                         return new CombatAction();
 
                     return new ExploreAction();
