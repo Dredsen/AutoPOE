@@ -5,6 +5,7 @@ using System.Numerics;
 using AutoPOE.Logic;
 using System.Threading.Tasks;
 using System;
+using System.Collections.Generic;
 using System.Windows.Forms;
 using ExileCore.Shared.Enums;
 using System.Linq;
@@ -17,99 +18,125 @@ namespace AutoPOE.Logic.Actions
         private Navigation.Path? _currentPath;
         private uint? _targetItemId;
 
-        // --- Fields for stuck item logic ---
         private int _consecutiveFailedClicks = 0;
+        private int _hardStuckAttempts = 0;
         private const int MAX_FAILED_CLICKS = 3;
 
-        // --- Fields for delayed loot spawning ---
         private DateTime _lootCheckCooldown = DateTime.MinValue;
-        private const int LOOT_COOLDOWN_MS = 7500;
+        private const int LOOT_COOLDOWN_MS = 2000;
 
         public async Task<ActionResultType> Tick()
         {
-            var item = Core.Map.ClosestValidGroundItem;
             var playerPos = Core.GameController.Player.GridPosNum;
+            var visibleLabels = Core.GameController.IngameState.IngameUi.ItemsOnGroundLabelsVisible;
 
-            if (item == null)
+            LabelOnGround targetItem = null;
+
+            if (_targetItemId.HasValue)
             {
+                targetItem = visibleLabels.FirstOrDefault(x => x.ItemOnGround.Id == _targetItemId.Value);
+            }
+
+            if (targetItem == null)
+            {
+                var bestItem = Core.Map.ClosestValidGroundItem;
+
+                if (bestItem != null)
+                {
+                    _targetItemId = bestItem.Entity.Id;
+                    targetItem = visibleLabels.FirstOrDefault(x => x.ItemOnGround.Id == _targetItemId.Value);
+
+                    _currentPath = null;
+                    _consecutiveFailedClicks = 0;
+                    _hardStuckAttempts = 0;
+                }
+            }
+
+            if (targetItem == null)
+            {
+                _targetItemId = null;
+
                 if (_lootCheckCooldown == DateTime.MinValue)
                 {
                     _lootCheckCooldown = DateTime.Now.AddMilliseconds(LOOT_COOLDOWN_MS);
-                    return ActionResultType.Running; // Wait
+                    return ActionResultType.Running;
                 }
 
                 if (DateTime.Now < _lootCheckCooldown)
-                {
-                    return ActionResultType.Running; // Keep waiting
-                }
+                    return ActionResultType.Running;
 
                 _lootCheckCooldown = DateTime.MinValue;
                 return ActionResultType.Success;
             }
 
-
-
             _lootCheckCooldown = DateTime.MinValue;
 
-            if (item.Entity.Id != _targetItemId)
-            {
-                _targetItemId = item.Entity.Id;
-                _currentPath = null;
-                _consecutiveFailedClicks = 0; // Reset fail counter for new item
-            }
-
-            // Original unstuck logic
-            if (Core.Settings.LootItemsUnstick && (DateTime.Now > SimulacrumState.LastMovedAt.AddSeconds(15) || DateTime.Now > SimulacrumState.LastToggledLootAt.AddSeconds(5)))
+            if (Core.Settings.LootItemsUnstick && (DateTime.Now > SimulacrumState.LastMovedAt.AddSeconds(15) || DateTime.Now > SimulacrumState.LastToggledLootAt.AddSeconds(10)))
             {
                 await Controls.UseKey(Keys.Z);
-                await Task.Delay(Core.Settings.ActionFrequency);
+                await Task.Delay(100);
                 await Controls.UseKey(Keys.Z);
-                await Task.Delay(500);
                 SimulacrumState.LastToggledLootAt = DateTime.Now;
             }
 
-            // Ensure loot labels are enabled
-            if (SimulacrumState.StashPosition != null &&
-                playerPos.Distance(SimulacrumState.StashPosition.Value) < Core.Settings.ViewDistance &&
-                !Core.GameController.IngameState.IngameUi.ItemsOnGroundLabelsVisible.Any(I => I.ItemOnGround != null && !string.IsNullOrEmpty(I.ItemOnGround.Metadata) && I.ItemOnGround.Metadata.Contains("Metadata/MiscellaneousObjects/Stash")))
-                await Controls.UseKey(Keys.Z);
-
-
-            // Check if we are close enough to click
-            if (playerPos.Distance(item.Entity.GridPosNum) < Core.Settings.NodeSize)
+            if (playerPos.Distance(targetItem.ItemOnGround.GridPosNum) < Core.Settings.NodeSize)
             {
                 _currentPath = null;
-                _consecutiveFailedClicks++; // Item hasn't disappeared, count as a failed click
+                _consecutiveFailedClicks++;
 
-                // Stuck item logic
                 if (_consecutiveFailedClicks >= MAX_FAILED_CLICKS)
                 {
-                    // Press Z twice to refresh loot labels
-                    await Controls.UseKey(Keys.Z);
-                    await Task.Delay(Core.Settings.ActionFrequency);
-                    await Controls.UseKey(Keys.Z);
-                    await Task.Delay(500); // Wait for labels to refresh
+                    _hardStuckAttempts++;
+                    _consecutiveFailedClicks = 0;
 
-                    _consecutiveFailedClicks = 0; // Reset counter
-                    return ActionResultType.Running; // Re-evaluate next tick
+                    if (_hardStuckAttempts == 1)
+                    {
+                        DebugWindow.LogMsg($"[LootAction] Item stuck behind UI? Toggling Z. (Id: {_targetItemId})", 2, SharpDX.Color.Yellow);
+                        await Controls.UseKey(Keys.Z);
+                        await Task.Delay(150);
+                        await Controls.UseKey(Keys.Z);
+                        await Task.Delay(300);
+                    }
+                    else if (_hardStuckAttempts == 2)
+                    {
+                        DebugWindow.LogMsg($"[LootAction] Item still stuck. Wiggling player. (Id: {_targetItemId})", 2, SharpDX.Color.Orange);
+
+                        var sharpCenter = Core.GameController.Window.GetWindowRectangle().Center;
+                        var screenCenter = new Vector2(sharpCenter.X, sharpCenter.Y);
+
+                        var randomOffset = new Vector2((float)(new Random().NextDouble() - 0.5f) * 25, (float)(new Random().NextDouble() - 0.5f) * 25);
+
+                        await Controls.ClickScreenPos(screenCenter + randomOffset);
+                        await Task.Delay(500);
+                    }
+                    else
+                    {
+                        DebugWindow.LogMsg($"[LootAction] Item {_targetItemId} is unlootable. Blacklisting.", 2, SharpDX.Color.Red);
+                        Core.Map.BlacklistItemId(_targetItemId.Value);
+                        _targetItemId = null;
+                        return ActionResultType.Running;
+                    }
+
+                    return ActionResultType.Running;
                 }
 
-                var labelCenter = item.ClientRect.Center;
-                await Controls.ClickScreenPos(new Vector2(labelCenter.X, labelCenter.Y));
+                if (targetItem.Label != null)
+                {
+                    var labelRect = targetItem.Label.GetClientRect();
+                    await Controls.ClickScreenPos(new Vector2(labelRect.Center.X, labelRect.Center.Y));
+                }
 
-                // Return Running. We must wait for the *next tick* to confirm the item is gone.
                 return ActionResultType.Running;
             }
 
-            // We are not close, so move to the item.
             if (_currentPath == null)
             {
-                _currentPath = Core.Map.FindPath(playerPos, item.Entity.GridPosNum);
+                _currentPath = Core.Map.FindPath(playerPos, targetItem.ItemOnGround.GridPosNum);
                 if (_currentPath == null)
                 {
-                    // Path not found, blacklist and fail
+                    DebugWindow.LogMsg($"[LootAction] No path to item {_targetItemId}. Blacklisting.", 2, SharpDX.Color.Red);
                     Core.Map.BlacklistItemId(_targetItemId.Value);
-                    _consecutiveFailedClicks = 0; // Reset counter
+                    _consecutiveFailedClicks = 0;
                     return ActionResultType.Failure;
                 }
             }
@@ -120,107 +147,11 @@ namespace AutoPOE.Logic.Actions
 
         public void Render()
         {
-            var possibleItems = Core.GameController.IngameState.IngameUi.ItemsOnGroundLabelElement.VisibleGroundItemLabels
-                .Where(item => item != null &&
-                               item.Label != null &&
-                               item.Entity != null &&
-                               item.Label.IsVisibleLocal &&
-                               item.Label.Text != null &&
-                               !item.Label.Text.EndsWith(" Gold"));
-
-            foreach (var item in possibleItems)
-                Core.Graphics.DrawCircle(new Vector2(item.ClientRect.Center.X, item.ClientRect.Center.Y), 10, SharpDX.Color.Pink);
-
-            Core.Graphics.DrawText($"Count: {possibleItems.Count()}  ID: {_targetItemId}", new Vector2(125, 125));
+            if (_targetItemId.HasValue)
+            {
+                Core.Graphics.DrawText($"Looting ID: {_targetItemId} | Fails: {_consecutiveFailedClicks} | StuckLvl: {_hardStuckAttempts}", new Vector2(500, 550));
+            }
             _currentPath?.Render();
         }
     }
 }
-
-
-/* 
- * OLD CODE FOR REFERENCE
-namespace AutoPOE.Logic.Actions
-{
-    public class LootAction : IAction
-    {
-
-        private Navigation.Path? _currentPath;
-        private uint? _targetItemId;
-
-        public async Task<ActionResultType> Tick()
-        {
-            var item = Core.Map.ClosestValidGroundItem;
-            var playerPos = Core.GameController.Player.GridPosNum;
-
-            if (item == null)
-                return ActionResultType.Success;
-
-            if (item.Entity.Id != _targetItemId)
-            {
-                _targetItemId = item.Entity.Id;
-                _currentPath = null;
-            }
-
-
-            //We haven't moved in multiple seconds. Try to unstuck by using Z twice. 
-            if (Core.Settings.LootItemsUnstick && (DateTime.Now > SimulacrumState.LastMovedAt.AddSeconds(3) || DateTime.Now > SimulacrumState.LastToggledLootAt.AddSeconds(5)))
-            {
-                await Controls.UseKey(Keys.Z);
-                await Task.Delay(Core.Settings.ActionFrequency);
-                await Controls.UseKey(Keys.Z);
-                await Task.Delay(500);
-                SimulacrumState.LastToggledLootAt = DateTime.Now;
-            }
-
-            
-
-            //Try to catch if we somehow left the loot labels disabled...
-            if (SimulacrumState.StashPosition != null &&
-                playerPos.Distance(SimulacrumState.StashPosition.Value) < Core.Settings.ViewDistance &&
-                !Core.GameController.IngameState.IngameUi.ItemsOnGroundLabelsVisible.Any(I =>I.ItemOnGround != null && !string.IsNullOrEmpty(I.ItemOnGround.Metadata)&& I.ItemOnGround.Metadata.Contains("Metadata/MiscellaneousObjects/Stash")))            
-                await Controls.UseKey(Keys.Z);
-            
-
-            if (playerPos.Distance(item.Entity.GridPosNum) < Core.Settings.NodeSize)
-            {
-                _currentPath = null;
-                var labelCenter = item.ClientRect.Center;
-                await Controls.ClickScreenPos(new Vector2(labelCenter.X, labelCenter.Y));
-                return ActionResultType.Success;
-            }
-
-            if (_currentPath == null)
-            {
-                _currentPath = Core.Map.FindPath(playerPos, item.Entity.GridPosNum);
-                if (_currentPath == null)
-                {
-                    Core.Map.BlacklistItemId(_targetItemId.Value);
-                    return ActionResultType.Failure;
-                }
-            }
-
-            await _currentPath.FollowPath();
-            return ActionResultType.Running;
-        }
-
-        public void Render()
-        {
-            var possibleItems = Core.GameController.IngameState.IngameUi.ItemsOnGroundLabelElement.VisibleGroundItemLabels
-                .Where(item=>item != null &&
-                        item.Label != null &&
-                        item.Entity != null &&
-                        item.Label.IsVisibleLocal &&
-                        item.Label.Text != null &&
-                        !item.Label.Text.EndsWith(" Gold"));
-
-            foreach (var item in possibleItems)
-                Core.Graphics.DrawCircle(new Vector2(item.ClientRect.Center.X, item.ClientRect.Center.Y), 10, SharpDX.Color.Pink);
-
-            Core.Graphics.DrawText($"Count: {possibleItems.Count()}  ID: {_targetItemId}", new Vector2(125, 125));
-            _currentPath?.Render();
-            
-        }
-    }
-}
-*/
